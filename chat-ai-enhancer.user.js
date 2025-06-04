@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Unified Chat AI Enhancer
-// @namespace    prozi
+// @namespace    Frozi
 // @version      2.5
 // @description  תגובות אוטומטיות לפי טריגרים שונים – אימוג'ים, רנדום, או תגובה בהקשר השיחה
 // @match        https://mail.google.com/*
