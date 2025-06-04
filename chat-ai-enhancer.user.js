@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Unified Chat AI Enhancer (גרסה 2.9)
 // @namespace    Frozi
-// @version      2.9
+// @version      2.9.1
 // @description  תגובות אוטומטיות לפי טריגרים (‘-’, ‘--’, ‘---’) – אימוג'ים, הקשר או אקראי במייל/צ’אט של גוגל (מאובטח, עם קיצורים תחביריים)
 // @match        https://mail.google.com/*
 // @match        https://chat.google.com/*
