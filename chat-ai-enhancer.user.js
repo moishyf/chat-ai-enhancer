@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Unified Chat AI Enhancer (גרסה 2.9)
+// @name         Unified Chat AI Enhancer (גרסה 3.1)
 // @namespace    Frozi
-// @version      2.9.1
-// @description  תגובות אוטומטיות לפי טריגרים (‘-’, ‘--’, ‘---’) – אימוג'ים, הקשר או אקראי במייל/צ’אט של גוגל (מאובטח, עם קיצורים תחביריים)
+// @version      3.1.0
+// @description  תגובות AI טבעיות בג׳ימייל/גוגל‑צ׳אט – טריגרים (‘-’,‘--’,‘---’) עם מודעות לשם הכותב
 // @match        https://mail.google.com/*
 // @match        https://chat.google.com/*
 // @run-at       document-end
@@ -17,215 +17,190 @@
 (() => {
   'use strict';
 
-  // — הגדרות בסיסיות —
-  const MODEL = 'gemini-1.5-flash-latest';
-  let MY_NAME = 'אני';
+  /* ───── CONSTANTS ───── */
+  const MODEL   = 'gemini-2.5-flash-preview-05-20';
+  let   MY_NAME = 'אני';          // יתעדכן אוטומטית
+  let   OTHER_NAME = '';          // השם של הצד שמולנו
 
-  // — קיצור ל־API Key ב־Storage —
+  /* ───── API‑KEY helpers ───── */
   const getKey = () => GM_getValue('gemini_api_key', '');
   const setKey = () => {
     const cur = getKey();
-    const input = prompt('🔑 הזן מפתח API מ-Gemini (השאר ריק למחיקה):', cur);
-    if (input === null) return;              // ביטול ללא שינוי
-    const trimmed = input.trim();
-    GM_setValue('gemini_api_key', trimmed);
-    alert(trimmed ? '✅ מפתח נשמר' : '🔓 מפתח נמחק');
+    const input = prompt('🔑 הזן מפתח API מ‑Gemini (ריק=מחיקה):', cur);
+    if (input === null) return;
+    GM_setValue('gemini_api_key', input.trim());
+    alert(input.trim() ? '✅ מפתח נשמר' : '🔓 מפתח נמחק');
   };
   GM_registerMenuCommand('🔑 הגדר מפתח API', setKey);
 
-  // — הוספת CSS מונע Trusted Types באווירת CSP —
+  /* ───── Styles (dot‑loader) ───── */
   GM_addStyle(`
-    @keyframes dots {
-      0% { content: ''; }
-      33% { content: '.'; }
-      66% { content: '..'; }
-      100% { content: '...'; }
-    }
-    .dotty::after {
-      display: inline-block;
-      white-space: pre;
-      animation: dots 1s steps(3,end) infinite;
-      content: '';
-    }
+    @keyframes dots{0%{content:''}33%{content:'.'}66%{content:'..'}100%{content:'...'}}
+    .dotty::after{display:inline-block;white-space:pre;animation:dots 1s steps(3,end) infinite;content:''}
   `);
 
-  // — משתנה לטיפול במצב “מחכה לתשובה” —
-  let waitingForReply = null;
+  /* ───── Utils ───── */
+  const $all = sel => Array.from(document.querySelectorAll(sel));
 
-  // — פונקציה כללית לשליחת בקשה ל-Gemini ולקבלת טקסט חזרה —
-  const askGemini = promptText => new Promise((resolve, reject) => {
+  /** מחזיר מערך כל ההודעות שיש בהן טקסט */
+  const getAllMessages = () =>
+    $all('.Zc1Emd').filter(el => el.innerText.trim());
+
+  /** שם השולח (html attribute) */
+const senderOf = el => (el?.closest('[data-sender-name]')?.getAttribute('data-sender-name')) || '';
+
+  const getLastSenderName = () => {
+    const msgs = getAllMessages();
+    const last = msgs.at(-1);
+    return last ? senderOf(last) : '';
+  };
+
+  /** X אחרונות (כולל שם השולח) */
+  const getLastMessagesText = n =>
+    getAllMessages()
+      .slice(-n)
+      .map(el => `${senderOf(el)}: ${el.innerText.trim()}`)
+      .join('\n');
+
+  const getLastMessageOnly = () => getAllMessages().at(-1)?.innerText.trim() || '';
+
+  /* ───── Name detection (us & peer) ───── */
+   const detectNames = activeBox => {
+   if (!activeBox?.isContentEditable) return;
+   const msgs = getAllMessages();
+   const idx  = msgs.findIndex(el => el.contains(activeBox));
+   if (idx > 0) {
+   const meCandidate = senderOf(msgs[idx - 1]);
+   if (meCandidate) MY_NAME = meCandidate;
+ }
+
+   const lastSender = getLastSenderName();
+   if (lastSender && lastSender !== MY_NAME) OTHER_NAME = lastSender;
+ };
+
+  /* ───── Random fallback replies ───── */
+  const RESPONSES = [
+    'סבבה', 'ברור', 'מגניב', 'וואלה', 'חח', 'קטלני', 'יאללה', 'מעולה', 'נשמע טוב',
+    '👍', '👌', '🤙', '🔥', '🚀', '✅', '😉'
+  ];
+
+  /* ───── Gemini call ───── */
+  const askGemini = promptText => new Promise(resolve => {
     const key = getKey();
-    if (!key) return resolve('🛑 אין מפתח API.');
+    if (!key) return resolve('🛑 חסר מפתח API.');
+
     GM_xmlhttpRequest({
       method: 'POST',
       url: `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`,
       headers: { 'Content-Type': 'application/json' },
-      data: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: promptText }] }] }),
+      data: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: promptText }] }]
+      }),
       onload: r => {
         try {
           const j = JSON.parse(r.responseText);
-          const text = j.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '❌ אין תגובה';
-          resolve(text);
-        } catch (e) {
-          console.error('Parsing Error:', e, r.responseText);
-          reject(e);
+          resolve(j.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '❌');
+        } catch {
+          resolve('❌ (parse error)');
         }
       },
-      onerror: err => {
-        console.error('Request Error:', err);
-        reject(err);
-      }
+      onerror: () => resolve('❌ (net error)')
     });
   });
 
-  // — קיצורי DOM ל־Gmail/Chat לסלקטורים סטנדרטיים של הודעות —
-  const getAllMessages = () =>
-    Array.from(document.querySelectorAll('.Zc1Emd')).filter(el => el.innerText.trim());
-  const getLastMessagesText = n =>
-    getAllMessages()
-      .slice(-n)
-      .map(el => `${el.closest('[data-sender-name]')?.getAttribute('data-sender-name') || 'משתמש'}: ${el.innerText.trim()}`)
-      .join('\n');
-  const getLastMessageOnly = () =>
-    getAllMessages().at(-1)?.innerText.trim() || '❌ לא נמצאה הודעה אחרונה.';
+  /* ───── Main key handler ───── */
+  let waitingForReply = null; // '-', '--', '---'
 
-  // — זיהוי עצמי (MY_NAME) מתוך ההודעה הישנה לפני תיבת הקלט —
-  const detectMyName = () => {
-    const box = document.activeElement;
-    if (!box?.isContentEditable) return;
-    const msgs = getAllMessages();
-    const idx = msgs.findIndex(el => el.contains(box));
-    const prev = msgs[idx - 1];
-    const sender = prev?.closest('[data-sender-name]')?.getAttribute('data-sender-name');
-    if (sender) {
-      MY_NAME = sender;
-      console.log('🕵️‍♂️ שם מזוהה:', MY_NAME);
-    }
+  const showLoader = (box, txt, desc) => {
+    box.textContent = '';
+    const w = document.createElement('span');
+    w.style.color = '#888';
+    w.textContent = desc;
+    const d = document.createElement('span');
+    d.classList.add('dotty');
+    w.appendChild(d);
+    box.appendChild(w);
   };
 
-  // — סט תגובות אקראיות (ניתן לקצר ולהוסיף/למשוך ממאגר אם רוצים) —
-  const RESPONSES = [
-    'סבבה', 'אושר', 'ברור', 'לגמרי', 'אולי', 'בטוח', 'חמוד', 'וואלה', 'נו', 'קול',
-    'הגיוני בהחלט', 'נשמע מעניין', 'לא יודע 🤷‍♂️', 'נראה לי', 'אפשרי לגמרי',
-    'אין תלונות', 'זה רעיון', 'על הכיפאק', 'שווה בדיקה', 'נזרום עם זה',
-    'תלוי בזווית', 'אחלה כיוון', 'סביר להניח', 'לא בטוח', 'כבר בדרך',
-    'זה משהו', 'מרים גבה', 'יאללה סבבה', 'חצי כוח', 'פחות מתחבר', 'אין שכל אין דאגות', 'שמחתי לתת שירות', 'השירות ניתן ללא עמלה',
-    'מגניב', 'יפה לך', 'פייר? מעניין', 'חזק', 'שמע מעולה', 'זה הולך',
-    'חיובי', 'שלילי', 'חצי־חצי', 'מתלבט', 'לא סגור', 'בכיף', 'קטן עליי',
-    'בדיוק חשבתי על זה', 'זה זה', 'נשמע פצצה', 'אליפות', 'יש מצב',
-    'לא נראה לי', 'נשמע פחות', 'דרוש בירור', 'קליל', 'כבד', 'טוב להבין',
-    'מחכה לתשובה', 'בינתיים סבבה', 'אחלה רעיון', 'תן לחשוב', 'תפור עליך',
-    'אש', 'סולידי', 'מבולבל', 'נשמר במערכת', 'כיוונתי לשם', 'נו שוין',
-    '👍', '👌', '🤙', '👏', '💪', '🤔', '🙃', '😅', '😎', '🤷‍♂️',
-    '🥳', '🔥', '🚀', '💡', '🔍', '🧐', '🆗', '⏳', '✅', '❌',
-    '⚠️', '🔄', '🤯', '🙌', '😐',
-    '👍 על זה', '🤔 מעניין', '🔥 הולך חזק', '🚀 קדימה', '✅ מאושר',
-    '❌ לא כרגע', '😅 ננסה', '😎 קיבלתי', '🧐 בודק', '🙏 תודה',
-    '⏳ רגע', '💡 הברקה', '🔄 חוזר אליך', '📌 סגור',
-    '🤯 וואו', '🙌 סיימנו', '🤝 עניין נסגר', '📚 לומד את זה',
-    '⚒️ בעבודה', '🌟 כוכב', '🥴 מסובך', '🤿 צולל לזה',
-    '🛠️ מתקן', '🍀 בהצלחה', '📞 נדבר', '💤 נרדמתי',
-    '🥲 ננסה שוב', '🎯 בול', '📈 מתקדם'
-  ];
-
-  // — מאזינים ל’פוקוס’ על תיבת התוכן (ContentEditable) למייל/צ’אט —
   window.addEventListener('focusin', ev => {
     const box = ev.target;
     if (!box.isContentEditable || box.dataset.hooked) return;
     box.dataset.hooked = '1';
-    detectMyName();
+
+    detectNames(box);
 
     box.addEventListener('keydown', async e => {
       if (e.key !== 'Enter') return;
       const txt = box.textContent.trim();
 
-      // — אם המשתמש הכניס "-", "--" או "---", נפעיל טריגר מיוחד —
+      /* ── Trigger start ── */
       if (['-', '--', '---'].includes(txt)) {
         e.preventDefault();
         e.stopImmediatePropagation();
         waitingForReply = txt;
-        box.textContent = ''; // מגרשים טקסט ישן
 
-        // ״Loader״ עם אנימציית נקודות
-        const wrapper = document.createElement('span');
-        wrapper.style.color = '#888';
-        wrapper.textContent = txt === '-' ? '🎨 מתרגם לאימוג\'ים' :
-                             txt === '--' ? '💭 מגיב לפי הקשר' :
-                                             '🎲 בוחר תגובה';
-        const dotSpan = document.createElement('span');
-        dotSpan.classList.add('dotty');
-        wrapper.appendChild(dotSpan);
-        box.appendChild(wrapper);
+        let loaderText = '🎲';
+        if (txt === '-')  loaderText = '🎨 אימוג׳ים מותאמים';
+        if (txt === '--') loaderText = '💭 מגיב בהקשר';
+        showLoader(box, txt, loaderText);
 
+        /* Build reply */
+        let reply = '';
         try {
-          let reply = '';
           if (txt === '-') {
-            // — טריגר אימוג'ים בלבד —
-            const lastMsg = getLastMessageOnly();
+            const last = getLastMessageOnly();
             const prompt = `
-אתה בוט תגובות בצ'אט, שנון וחכם, מגיב לאנשים באמצעות 2–3 אימוג'ים בלבד (ללא טקסט).
-התשובה צריכה להיות קצרה וברי־הבנה, כאילו לחבר קרוב.
-שאלה: "${lastMsg}"
-תגובה (אימוג'ים בלבד, עד 3):`;
-            reply = await askGemini(prompt);
-          } else if (txt === '--') {
-            // — טריגר הקשרי —
-            const context = getLastMessagesText(10);
-            const prompt = `
-להלן מספר הודעות אחרונות בצ'אט בין שני אנשים.
-עליך לכתוב תשובה טבעית, קצרה, אמיתית, בלי מילים גבוהות, בלי הקדמות, כאילו אתה עונה לחבר שלך בווטסאפ או גוגל צ'אט.
-התגובה צריכה להשתלב הכי טבעי שיש ולפעמים גם אפשר להשיב סתם ב"חח", "סבבה", "מגניב", או דומה, אם זה מתאים.
-הודעות אחרונות:
-${context}
-כתוב רק את התגובה שלך, בלי תוספות מסביב.
+אתה כותב *רק* 1‑3 אימוג׳ים שמתאימים לתוכן הבא שנכתב ע"י "${OTHER_NAME}":
+"${last}"
+ללא מילים כלל – אימוג׳ים בלבד!
 `.trim();
             reply = await askGemini(prompt);
-          } else {
-            // — טריגר אקראי (“---”) —
-            const i = Math.floor(Math.random() * RESPONSES.length);
-            reply = RESPONSES[i];
-          }
+          } else if (txt === '--') {
+            const context = getLastMessagesText(6);
+            const last    = getLastMessageOnly();
+            // אם השאלה היא על שם, תענה בעצמך – בלי לפנות ל‑Gemini
+            if (/איך קוראים|מה השם שלי/iu.test(last)) {
+              reply = OTHER_NAME || 'לא בטוח';
+            } else {
+              const prompt = `
+להלן 6 ההודעות האחרונות בצ'אט. אתה הוא "${MY_NAME}".
+${OTHER_NAME ? `לחבר שלך קוראים "${OTHER_NAME}".` : ''}
 
-          // לאחר קבלת התשובה, מציגים אותה (ירוקה) עם רמז לשליחה
-          box.textContent = reply + '\n← לחץ Enter לשליחה';
-          box.style.color = 'green';
-        } catch (err) {
-          console.error('Error in askGemini:', err);
-          box.textContent = '🛑 שגיאה';
-          box.style.color = 'red';
+על סמך ההודעה *האחרונה בלבד* כתוב תשובה קצרה, טבעית, יומיומית (עד 15 מילים). אם צריך אפשר להתחשב בקונטקסט הקודם.
+הודעות:
+${context}
+-----
+תגובה שלך בלבד:
+`.trim();
+              reply = await askGemini(prompt);
+            }
+          } else {
+            reply = RESPONSES[Math.floor(Math.random()*RESPONSES.length)];
+          }
+        } catch(err){
+          console.error(err);
+          reply = '🛑 שגיאה';
         }
 
+        box.textContent = reply + '\n← Enter לשליחה';
+        box.style.color = 'green';
         return;
       }
 
-      // — אם כעת מחכים לתשובה והמשתמש לוחץ Enter שוב, שולחים את התשובה —
-      if (waitingForReply === '-') {
-        if (box.textContent.endsWith('← לחץ Enter לשליחה')) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          box.textContent = box.textContent.replace('\n← לחץ Enter לשליחה', '');
-          box.style.color = '';
-          waitingForReply = null;
-          box.dispatchEvent(new KeyboardEvent('keydown', {
-            key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
-            bubbles: true, cancelable: true
-          }));
-        }
-      } else if (waitingForReply === '--' || waitingForReply === '---') {
-        if (box.textContent.endsWith('← לחץ Enter לשליחה')) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          box.textContent = box.textContent.replace('\n← לחץ Enter לשליחה', '');
-          box.style.color = '';
-          waitingForReply = null;
-          box.dispatchEvent(new KeyboardEvent('keydown', {
-            key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
-            bubbles: true, cancelable: true
-          }));
-        }
+      /* ── Second Enter => send ── */
+      if (waitingForReply && box.textContent.endsWith('← Enter לשליחה')) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        box.textContent = box.textContent.replace('\n← Enter לשליחה', '');
+        box.style.color = '';
+        waitingForReply = null;
+        box.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Enter', code: 'Enter', keyCode: 13, which: 13,
+          bubbles: true, cancelable: true
+        }));
       }
     }, true);
   });
 
-  console.log('✅ Unified AI Script (גרסה 2.9) נטען – טריגרים: "-", "--", "---".');
+  console.log('✅ Unified AI Enhancer 3.1 טעון – טריגרים: -, --, ---');
 })();
