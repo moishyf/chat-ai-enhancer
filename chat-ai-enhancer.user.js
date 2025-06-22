@@ -110,7 +110,7 @@
       if (e.key !== 'Enter') return;
       const txt = box.textContent.trim();
 
-      if (['-', '--', '---'].includes(txt)) {
+    if (['-', '--', '---'].includes(txt)) {
         e.preventDefault();
         e.stopImmediatePropagation();
         waitingForReply = txt;
@@ -137,6 +137,10 @@
               lastContextPrompt = prompt;
               reply = await askGemini(prompt);
             }
+           } else if (txt === '----') {
+              const prompt = `כתבו לך הודעת תודה בצ'אט. כתוב תגובה קצרה, טבעית, נעימה ומנומסת לתודה, כמו "שמחתי לתת שירות!", "שמחתי לעזור", או "השירות ניתן ללא עמלה" או "נציגינו ישמחו להמשיך לתת שירות בתוך שעות הפעילות" – בעברית, שיהיה תגובה בסגנון מערכתי של חברה גדולה עד 10 מילים.`;
+             lastContextPrompt = prompt;
+             reply = await askGemini(prompt);
           } else {
             reply = RESPONSES[Math.floor(Math.random() * RESPONSES.length)];
           }
