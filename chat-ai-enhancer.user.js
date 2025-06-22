@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Unified Chat AI Enhancer (גרסה 3.2.1)
+// @name         Unified Chat AI Enhancer (גרסה 3.2)
 // @namespace    Frozi
-// @version      3.2.1
+// @version      3.2.0
 // @description  תגובות AI טבעיות בג׳ימייל/גוגל‑צ׳אט – טריגרים (‘-’,‘--’,‘---’) עם מודעות לשם הכותב וטעינה חוזרת ב-TAB
 // @match        https://mail.google.com/*
 // @match        https://chat.google.com/*
@@ -34,10 +34,10 @@
   };
   GM_registerMenuCommand('🔑 הגדר מפתח API', setKey);
 
-  GM_addStyle(`
+  GM_addStyle(
     @keyframes dots{0%{content:''}33%{content:'.'}66%{content:'..'}100%{content:'...'}}
     .dotty::after{display:inline-block;white-space:pre;animation:dots 1s steps(3,end) infinite;content:''}
-  `);
+  );
 
   const $all = sel => Array.from(document.querySelectorAll(sel));
   const getAllMessages = () => $all('.Zc1Emd').filter(el => el.innerText.trim());
@@ -50,7 +50,7 @@
   const getLastMessagesText = n =>
     getAllMessages()
       .slice(-n)
-      .map(el => `${senderOf(el)}: ${el.innerText.trim()}`)
+      .map(el => ${senderOf(el)}: ${el.innerText.trim()})
       .join('\n');
   const getLastMessageOnly = () => getAllMessages().at(-1)?.innerText.trim() || '';
 
@@ -73,7 +73,7 @@
     if (!key) return resolve('🛑 חסר מפתח API.');
     GM_xmlhttpRequest({
       method: 'POST',
-      url: `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`,
+      url: https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key},
       headers: { 'Content-Type': 'application/json' },
       data: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: promptText }] }] }),
       onload: r => {
@@ -110,7 +110,7 @@
       if (e.key !== 'Enter') return;
       const txt = box.textContent.trim();
 
-    if (['-', '--', '---'].includes(txt)) {
+      if (['-', '--', '---'].includes(txt)) {
         e.preventDefault();
         e.stopImmediatePropagation();
         waitingForReply = txt;
@@ -124,7 +124,7 @@
         try {
           if (txt === '-') {
             const last = getLastMessageOnly();
-            const prompt = `אתה כותב *רק* 1‑3 אימוג׳ים שמתאימים לתוכן הבא שנכתב ע"י "${OTHER_NAME}":\n"${last}"\nללא מילים כלל – אימוג׳ים בלבד!`;
+            const prompt = אתה כותב *רק* 1‑3 אימוג׳ים שמתאימים לתוכן הבא שנכתב ע"י "${OTHER_NAME}":\n"${last}"\nללא מילים כלל – אימוג׳ים בלבד!;
             lastContextPrompt = prompt;
             reply = await askGemini(prompt);
           } else if (txt === '--') {
@@ -133,14 +133,10 @@
             if (/איך קוראים|מה השם שלי/iu.test(last)) {
               reply = OTHER_NAME || 'לא בטוח';
             } else {
-              const prompt = `להלן 6 ההודעות האחרונות בצ'אט. אתה הוא "${MY_NAME}".\n${OTHER_NAME ? `לחבר שלך קוראים "${OTHER_NAME}".` : ''}\n\nעל סמך ההודעה *האחרונה בלבד* כתוב תשובה קצרה, טבעית, יומיומית (עד 15 מילים). אם צריך אפשר להתחשב בקונטקסט הקודם.\nהודעות:\n${context}\n-----\nתגובה שלך בלבד:`;
+              const prompt = להלן 6 ההודעות האחרונות בצ'אט. אתה הוא "${MY_NAME}".\n${OTHER_NAME ? לחבר שלך קוראים "${OTHER_NAME}". : ''}\n\nעל סמך ההודעה *האחרונה בלבד* כתוב תשובה קצרה, טבעית, יומיומית (עד 15 מילים). אם צריך אפשר להתחשב בקונטקסט הקודם.\nהודעות:\n${context}\n-----\nתגובה שלך בלבד:;
               lastContextPrompt = prompt;
               reply = await askGemini(prompt);
             }
-           } else if (txt === '----') {
-              const prompt = `כתבו לך הודעת תודה בצ'אט. כתוב תגובה קצרה, טבעית, נעימה ומנומסת לתודה, כמו "שמחתי לתת שירות!", "שמחתי לעזור", או "השירות ניתן ללא עמלה" או "נציגינו ישמחו להמשיך לתת שירות בתוך שעות הפעילות" – בעברית, שיהיה תגובה בסגנון מערכתי של חברה גדולה עד 10 מילים.`;
-             lastContextPrompt = prompt;
-             reply = await askGemini(prompt);
           } else {
             reply = RESPONSES[Math.floor(Math.random() * RESPONSES.length)];
           }
