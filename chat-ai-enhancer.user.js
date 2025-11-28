@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Unified Chat AI Enhancer (גרסה 3.4.1)
+// @name         Unified Chat AI Enhancer (גרסה 3.4.2)
 // @namespace    Frozi
 // @version      3.4.1
 // @description  תגובות AI טבעיות בג׳ימייל/גוגל-צ׳אט – טריגרים (‘-’,‘--’,‘---’) עם מודעות לשם הכותב וטעינה חוזרת ב-TAB
