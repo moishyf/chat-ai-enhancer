@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Unified Chat AI Enhancer (גרסה 3.4.3)
+// @name         Unified Chat AI Enhancer (גרסה 3.4.4)
 // @namespace    Frozi
-// @version      3.4.3
-// @description  תגובות AI טבעיות בג׳ימייל/גוגל-צ׳אט – טריגרים (‘-’,‘--’,‘---’) עם מודעות לשם הכותב וטעינה חוזרת ב-TAB
+// @version      3.4.4
+// @description  תגובות AI טבעיות בג׳ימייל/גוגל-צ׳אט – טריגרים (-/--/---) + בדיקת מפתח אוטומטית
 // @match        https://mail.google.com/*
 // @match        https://chat.google.com/*
 // @run-at       document-end
@@ -17,7 +17,6 @@
 (() => {
   'use strict';
 
-  // עדכון למודל יציב יותר (Flash 1.5 הוא המהיר והסטנדרטי כרגע)
   const MODEL = 'gemini-1.5-flash';
   let MY_NAME = 'אני';
   let OTHER_NAME = '';
@@ -25,15 +24,34 @@
   let activeBox = null;
   let waitingForReply = null;
 
+  // --- ניהול מפתח API ---
   const getKey = () => GM_getValue('gemini_api_key', '');
+  
   const setKey = () => {
     const cur = getKey();
-    const input = prompt('🔑 הזן מפתח API מ-Gemini (ריק=מחיקה):', cur);
-    if (input === null) return;
+    // הצגת הודעה מעט ברורה יותר
+    const input = prompt(
+      'Unified Chat AI:\n\nהזן את מפתח ה-API שלך מ-Google Gemini:\n(אם תשאיר ריק - המפתח יימחק)', 
+      cur
+    );
+    if (input === null) return; // המשתמש לחץ ביטול
     GM_setValue('gemini_api_key', input.trim());
-    alert(input.trim() ? '✅ מפתח נשמר' : '🔓 מפתח נמחק');
+    
+    if (input.trim()) {
+        alert('✅ מפתח נשמר בהצלחה! עכשיו אפשר להשתמש בטריגרים.');
+    } else {
+        alert('🔓 המפתח נמחק.');
+    }
   };
+
+  // רישום הפקודה בתפריט (למקרה שתרצה לשנות בעתיד)
   GM_registerMenuCommand('🔑 הגדר מפתח API', setKey);
+
+  // --- תיקון: בדיקה אוטומטית בטעינה ---
+  // אם אין מפתח שמור, נקפיץ את החלונית אוטומטית אחרי שנייה
+  if (!getKey()) {
+      setTimeout(setKey, 1500);
+  }
 
   GM_addStyle(`
     @keyframes dots {
@@ -50,13 +68,11 @@
     }
   `);
 
-  // פונקציה לעדכון React של גוגל שהטקסט השתנה (קריטי לשליחה!)
   const triggerInputEvent = (element) => {
     element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
   };
 
   const $all = sel => Array.from(document.querySelectorAll(sel));
-  // הערה: .Zc1Emd הוא שם מחלקה שעלול להשתנות בעדכוני גוגל
   const getAllMessages = () => $all('.Zc1Emd').filter(el => el.innerText.trim());
   
   const senderOf = el =>
@@ -80,7 +96,6 @@
   const detectNames = activeBox => {
     if (!activeBox?.isContentEditable) return;
     const msgs = getAllMessages();
-    // בדיקה בטוחה יותר למקרה שההודעה לא נמצאה
     const idx = msgs.findIndex(el => el.contains(activeBox)); 
     if (idx > 0) {
       const meCandidate = senderOf(msgs[idx - 1]);
@@ -98,7 +113,10 @@
   const askGemini = promptText =>
     new Promise(resolve => {
       const key = getKey();
-      if (!key) return resolve('🛑 חסר מפתח API.');
+      if (!key) {
+          setKey(); // אם מנסים להשתמש ואין מפתח - נקפיץ שוב את החלון
+          return resolve('🛑 חסר מפתח API - הזן אותו בחלון שנפתח');
+      }
       GM_xmlhttpRequest({
         method: 'POST',
         url: `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`,
@@ -134,7 +152,6 @@
 
   window.addEventListener('focusin', ev => {
     const box = ev.target;
-    // וידוא שהאלמנט הוא באמת תיבת טקסט של צ'אט
     if (!box.isContentEditable || box.dataset.hooked) return;
     
     box.dataset.hooked = '1';
@@ -143,11 +160,8 @@
 
     box.addEventListener('keydown', async e => {
         if (e.key !== 'Enter') return;
-        
-        // תיקון: שימוש ב-innerText לפעמים מדויק יותר למניעת רווחים נסתרים
         const txt = box.innerText.trim(); 
 
-        // --- טיפול בטריגרים ---
         if (['-', '--', '---'].includes(txt)) {
           e.preventDefault();
           e.stopImmediatePropagation();
@@ -192,11 +206,9 @@ ${context}
             reply = '🛑 שגיאה';
           }
 
-          // הצגת התשובה והוראה לשליחה
           box.textContent = reply + '\n← Enter לשליחה';
           box.style.color = 'green';
           
-          // חשוב: הזזת הסמן לסוף כדי שהמשתמש יראה את הכל
           const range = document.createRange();
           range.selectNodeContents(box);
           range.collapse(false);
@@ -207,21 +219,17 @@ ${context}
           return;
         }
 
-        // --- טיפול בשליחה בפועל (Enter השני) ---
         if (waitingForReply && box.innerText.includes('← Enter לשליחה')) {
           e.preventDefault();
           e.stopImmediatePropagation();
 
-          // ניקוי הטקסט המיותר
           const cleanText = box.innerText.replace(/\n?← Enter לשליחה/g, '').trim();
           box.textContent = cleanText;
           box.style.color = '';
           waitingForReply = null;
 
-          // **תיקון קריטי**: עדכון המערכת של גוגל שהטקסט השתנה
           triggerInputEvent(box); 
 
-          // השהייה קטנטנה כדי לוודא שגוגל קלטו את הטקסט לפני ה-Enter
           setTimeout(() => {
               box.dispatchEvent(new KeyboardEvent('keydown', {
                 key: 'Enter',
@@ -234,10 +242,9 @@ ${context}
               }));
           }, 10);
         }
-      }, true); // שימוש ב-capture phase
+      }, true);
   });
 
-  // --- טיפול בטעינה חוזרת (TAB) ---
   document.addEventListener('keydown', async e => {
     if (
       e.key === 'Tab' &&
@@ -246,14 +253,13 @@ ${context}
       activeBox?.isContentEditable
     ) {
       e.preventDefault();
-      e.stopImmediatePropagation(); // מניעת מעבר פוקוס
+      e.stopImmediatePropagation();
       showLoader(activeBox, '', '🔄 תגובה חדשה...');
       try {
         const newReply = await askGemini(lastContextPrompt);
         activeBox.textContent = newReply + '\n← Enter לשליחה';
         activeBox.style.color = 'green';
         
-        // עדכון הפוקוס לסוף
         const range = document.createRange();
         range.selectNodeContents(activeBox);
         range.collapse(false);
@@ -268,5 +274,5 @@ ${context}
     }
   });
 
-  console.log('✅ Unified AI Enhancer 3.4.3 נטען – טריגרים: -, --, --- (TAB=רענון)');
+  console.log('✅ Unified AI Enhancer 3.4.4 נטען');
 })();
