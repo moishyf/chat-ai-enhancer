@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Unified Chat AI Enhancer (גרסה 3.4.2)
+// @name         Unified Chat AI Enhancer (גרסה 3.4.3)
 // @namespace    Frozi
-// @version      3.4.2
+// @version      3.4.3
 // @description  תגובות AI טבעיות בג׳ימייל/גוגל-צ׳אט – טריגרים (‘-’,‘--’,‘---’) עם מודעות לשם הכותב וטעינה חוזרת ב-TAB
 // @match        https://mail.google.com/*
 // @match        https://chat.google.com/*
@@ -17,7 +17,8 @@
 (() => {
   'use strict';
 
-  const MODEL = 'gemini-2.5-flash-preview-05-20';
+  // עדכון למודל יציב יותר (Flash 1.5 הוא המהיר והסטנדרטי כרגע)
+  const MODEL = 'gemini-1.5-flash';
   let MY_NAME = 'אני';
   let OTHER_NAME = '';
   let lastContextPrompt = '';
@@ -35,41 +36,52 @@
   GM_registerMenuCommand('🔑 הגדר מפתח API', setKey);
 
   GM_addStyle(`
-@keyframes dots {
-  0% { content: '' }
-  33% { content: '.' }
-  66% { content: '..' }
-  100% { content: '...' }
-}
-.dotty::after {
-  display: inline-block;
-  white-space: pre;
-  animation: dots 1s steps(3,end) infinite;
-  content: '';
-}
-`);
+    @keyframes dots {
+      0% { content: '' }
+      33% { content: '.' }
+      66% { content: '..' }
+      100% { content: '...' }
+    }
+    .dotty::after {
+      display: inline-block;
+      white-space: pre;
+      animation: dots 1s steps(3,end) infinite;
+      content: '';
+    }
+  `);
+
+  // פונקציה לעדכון React של גוגל שהטקסט השתנה (קריטי לשליחה!)
+  const triggerInputEvent = (element) => {
+    element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+  };
 
   const $all = sel => Array.from(document.querySelectorAll(sel));
+  // הערה: .Zc1Emd הוא שם מחלקה שעלול להשתנות בעדכוני גוגל
   const getAllMessages = () => $all('.Zc1Emd').filter(el => el.innerText.trim());
+  
   const senderOf = el =>
     (el?.closest('[data-sender-name]')?.getAttribute('data-sender-name')) || '';
+  
   const getLastSenderName = () => {
     const msgs = getAllMessages();
     const last = msgs.at(-1);
     return last ? senderOf(last) : '';
   };
+
   const getLastMessagesText = n =>
     getAllMessages()
       .slice(-n)
       .map(el => `${senderOf(el)}: ${el.innerText.trim()}`)
       .join('\n');
+
   const getLastMessageOnly = () =>
     getAllMessages().at(-1)?.innerText.trim() || '';
 
   const detectNames = activeBox => {
     if (!activeBox?.isContentEditable) return;
     const msgs = getAllMessages();
-    const idx = msgs.findIndex(el => el.contains(activeBox));
+    // בדיקה בטוחה יותר למקרה שההודעה לא נמצאה
+    const idx = msgs.findIndex(el => el.contains(activeBox)); 
     if (idx > 0) {
       const meCandidate = senderOf(msgs[idx - 1]);
       if (meCandidate) MY_NAME = meCandidate;
@@ -79,22 +91,8 @@
   };
 
   const RESPONSES = [
-    'סבבה',
-    'ברור',
-    'מגניב',
-    'וואלה',
-    'חח',
-    'קטלני',
-    'יאללה',
-    'מעולה',
-    'נשמע טוב',
-    '👍',
-    '👌',
-    '🤙',
-    '🔥',
-    '🚀',
-    '✅',
-    '😉'
+    'סבבה', 'ברור', 'מגניב', 'וואלה', 'חח', 'קטלני', 'יאללה',
+    'מעולה', 'נשמע טוב', '👍', '👌', '🤙', '🔥', '🚀', '✅', '😉'
   ];
 
   const askGemini = promptText =>
@@ -112,7 +110,7 @@
           try {
             const j = JSON.parse(r.responseText);
             resolve(
-              j.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '❌'
+              j.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '❌ שגיאה בתשובה'
             );
           } catch (e) {
             console.error(e);
@@ -136,17 +134,20 @@
 
   window.addEventListener('focusin', ev => {
     const box = ev.target;
+    // וידוא שהאלמנט הוא באמת תיבת טקסט של צ'אט
     if (!box.isContentEditable || box.dataset.hooked) return;
+    
     box.dataset.hooked = '1';
     activeBox = box;
     detectNames(box);
 
-    box.addEventListener(
-      'keydown',
-      async e => {
+    box.addEventListener('keydown', async e => {
         if (e.key !== 'Enter') return;
-        const txt = box.textContent.trim();
+        
+        // תיקון: שימוש ב-innerText לפעמים מדויק יותר למניעת רווחים נסתרים
+        const txt = box.innerText.trim(); 
 
+        // --- טיפול בטריגרים ---
         if (['-', '--', '---'].includes(txt)) {
           e.preventDefault();
           e.stopImmediatePropagation();
@@ -191,39 +192,52 @@ ${context}
             reply = '🛑 שגיאה';
           }
 
+          // הצגת התשובה והוראה לשליחה
           box.textContent = reply + '\n← Enter לשליחה';
           box.style.color = 'green';
+          
+          // חשוב: הזזת הסמן לסוף כדי שהמשתמש יראה את הכל
+          const range = document.createRange();
+          range.selectNodeContents(box);
+          range.collapse(false);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          
           return;
         }
 
-        if (
-          waitingForReply &&
-          box.textContent.endsWith('← Enter לשליחה')
-        ) {
+        // --- טיפול בשליחה בפועל (Enter השני) ---
+        if (waitingForReply && box.innerText.includes('← Enter לשליחה')) {
           e.preventDefault();
           e.stopImmediatePropagation();
-          box.textContent = box.textContent.replace(
-            '\n← Enter לשליחה',
-            ''
-          );
+
+          // ניקוי הטקסט המיותר
+          const cleanText = box.innerText.replace(/\n?← Enter לשליחה/g, '').trim();
+          box.textContent = cleanText;
           box.style.color = '';
           waitingForReply = null;
-          box.dispatchEvent(
-            new KeyboardEvent('keydown', {
-              key: 'Enter',
-              code: 'Enter',
-              keyCode: 13,
-              which: 13,
-              bubbles: true,
-              cancelable: true
-            })
-          );
+
+          // **תיקון קריטי**: עדכון המערכת של גוגל שהטקסט השתנה
+          triggerInputEvent(box); 
+
+          // השהייה קטנטנה כדי לוודא שגוגל קלטו את הטקסט לפני ה-Enter
+          setTimeout(() => {
+              box.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Enter',
+                code: 'Enter',
+                keyCode: 13,
+                which: 13,
+                bubbles: true,
+                cancelable: true,
+                composed: true
+              }));
+          }, 10);
         }
-      },
-      true
-    );
+      }, true); // שימוש ב-capture phase
   });
 
+  // --- טיפול בטעינה חוזרת (TAB) ---
   document.addEventListener('keydown', async e => {
     if (
       e.key === 'Tab' &&
@@ -232,11 +246,21 @@ ${context}
       activeBox?.isContentEditable
     ) {
       e.preventDefault();
+      e.stopImmediatePropagation(); // מניעת מעבר פוקוס
       showLoader(activeBox, '', '🔄 תגובה חדשה...');
       try {
         const newReply = await askGemini(lastContextPrompt);
         activeBox.textContent = newReply + '\n← Enter לשליחה';
         activeBox.style.color = 'green';
+        
+        // עדכון הפוקוס לסוף
+        const range = document.createRange();
+        range.selectNodeContents(activeBox);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        
       } catch (err) {
         console.error(err);
         activeBox.textContent = '🛑 שגיאה';
@@ -244,7 +268,5 @@ ${context}
     }
   });
 
-  console.log(
-    '✅ Unified AI Enhancer 3.4.1 נטען – טריגרים: -, --, --- (TAB=רענון)'
-  );
+  console.log('✅ Unified AI Enhancer 3.4.3 נטען – טריגרים: -, --, --- (TAB=רענון)');
 })();
