@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Google Chat AI Replier (Gemini) - Pro
 // @namespace    Frozi
-// @version      2.2.1
+// @version      2.3.0
+// @description  AI replies for Google Chat with a complete settings panel
 // @updateURL    https://raw.githubusercontent.com/moishyf/chat-ai-enhancer/main/chat-ai-enhancer.user.js
 // @downloadURL  https://raw.githubusercontent.com/moishyf/chat-ai-enhancer/main/chat-ai-enhancer.user.js
-// @description  AI replies for Google Chat with a complete settings panel
 // @match        https://mail.google.com/*
 // @match        https://chat.google.com/*
 // @grant        GM_getValue
@@ -83,6 +83,29 @@
         }
     };
 
+    const REPHRASE_LEVEL_OPTIONS = {
+        proofread: {
+            label: 'תיקונים בלבד',
+            prompt: 'תקן רק שגיאות כתיב, דקדוק, פיסוק, רווחים וחלוקה לפסקאות. אל תשנה את בחירת המילים, הטון או מבנה המשפטים מעבר לנדרש לתיקון טעות ברורה'
+        },
+        polish: {
+            label: 'שיפור עדין',
+            prompt: 'שפר בהירות, זרימה ודיוק, אך שמור ככל האפשר על המילים, הקול האישי, המבנה והאורך של הטיוטה'
+        },
+        rewrite: {
+            label: 'ניסוח מחדש מלא',
+            prompt: 'נסח את הטיוטה מחדש באופן מהותי וברור יותר, תוך שמירה מלאה על הכוונה, העובדות והמסר המקורי'
+        }
+    };
+
+    const REPHRASE_STYLE_OPTIONS = {
+        preserve: {
+            label: 'שמירת הסגנון המקורי',
+            prompt: 'שמור על הסגנון והטון המקוריים של הטיוטה'
+        },
+        ...STYLE_OPTIONS
+    };
+
     const lastAutoReplyTime = {};
     const autoReplyTimers = new WeakMap();
     let scanScheduled = false;
@@ -110,6 +133,12 @@
             gender: String(GM_getValue('gemini_user_gender', '') || ''),
             style: migrateStyle(GM_getValue('gemini_reply_style', 'direct')),
             length: migrateLength(GM_getValue('gemini_reply_length', 'short')),
+            rephraseLevel: REPHRASE_LEVEL_OPTIONS[GM_getValue('gemini_rephrase_level', 'polish')]
+                ? GM_getValue('gemini_rephrase_level', 'polish')
+                : 'polish',
+            rephraseStyle: REPHRASE_STYLE_OPTIONS[GM_getValue('gemini_rephrase_style', 'preserve')]
+                ? GM_getValue('gemini_rephrase_style', 'preserve')
+                : 'preserve',
             customInstructions: String(GM_getValue('gemini_custom_instructions', '') || '')
         };
     }
@@ -457,6 +486,16 @@
         const lengthControl = createUiElement('select', { id: 'gemini-length-input' });
         appendSelectOptions(lengthControl, LENGTH_OPTIONS);
 
+        const rephraseLevelControl = createUiElement('select', {
+            id: 'gemini-rephrase-level-input'
+        });
+        appendSelectOptions(rephraseLevelControl, REPHRASE_LEVEL_OPTIONS);
+
+        const rephraseStyleControl = createUiElement('select', {
+            id: 'gemini-rephrase-style-input'
+        });
+        appendSelectOptions(rephraseStyleControl, REPHRASE_STYLE_OPTIONS);
+
         const customControl = createUiElement('textarea', {
             id: 'gemini-custom-input',
             attributes: {
@@ -478,6 +517,12 @@
             createSettingsField('המגדר שלי', genderControl, { full: false }),
             createSettingsField('סגנון תגובה', styleControl, { full: false }),
             createSettingsField('אורך תגובה', lengthControl, { full: false }),
+            createSettingsField('עומק השינוי בכפתור ניסוח', rephraseLevelControl, {
+                full: false
+            }),
+            createSettingsField('סגנון כפתור ניסוח', rephraseStyleControl, {
+                full: false
+            }),
             createSettingsField('הנחיות סגנון אישיות', customControl),
             createSettingsField('תגובה אוטומטית לאנשי קשר', autoControl, {
                 hint: 'יש להפריד שמות בפסיק. לאנשים אלה התגובה תישלח אוטומטית.'
@@ -513,6 +558,8 @@
         const genderInput = root.getElementById('gemini-gender-input');
         const styleInput = root.getElementById('gemini-style-input');
         const lengthInput = root.getElementById('gemini-length-input');
+        const rephraseLevelInput = root.getElementById('gemini-rephrase-level-input');
+        const rephraseStyleInput = root.getElementById('gemini-rephrase-style-input');
         const customInput = root.getElementById('gemini-custom-input');
         const autoInput = root.getElementById('gemini-auto-input');
         const errorElement = root.getElementById('settings-error');
@@ -522,6 +569,8 @@
         genderInput.value = settings.gender;
         styleInput.value = settings.style;
         lengthInput.value = settings.length;
+        rephraseLevelInput.value = settings.rephraseLevel;
+        rephraseStyleInput.value = settings.rephraseStyle;
         customInput.value = settings.customInstructions;
         autoInput.value = settings.autoChats;
 
@@ -569,6 +618,8 @@
             GM_setValue('gemini_user_gender', gender);
             GM_setValue('gemini_reply_style', styleInput.value);
             GM_setValue('gemini_reply_length', lengthInput.value);
+            GM_setValue('gemini_rephrase_level', rephraseLevelInput.value);
+            GM_setValue('gemini_rephrase_style', rephraseStyleInput.value);
             GM_setValue('gemini_custom_instructions', customInput.value.trim());
 
             closeModal();
@@ -585,7 +636,7 @@
 
         let rawText = chatElement.innerText || '';
         rawText = rawText.replace(
-            /✨ מלל|✨ 🚀|🔄 מחדש|⚙ הגדרות|⚙️ הגדרות|חושב\.\.\.|הוספת תגובה|Reply|השב|העברה לתיבת הדואר הנכנס/g,
+            /✨ מלל|✨ אימוג׳י|✨ 🚀|↻ מחדש|🔄 מחדש|✎ ניסוח|⚙ הגדרות|⚙️ הגדרות|חושב\.\.\.|הוספת תגובה|Reply|השב|העברה לתיבת הדואר הנכנס/g,
             ''
         );
 
@@ -609,6 +660,21 @@
     function buildReplyInstruction(settings, mode) {
         if (mode === 'emoji') {
             return 'השב רק באמצעות אימוג׳י אחד או כמה אימוג׳ים שמתאימים לשיחה. אל תוסיף מילים.';
+        }
+
+        if (mode === 'rephrase') {
+            const levelPrompt = REPHRASE_LEVEL_OPTIONS[settings.rephraseLevel]?.prompt ||
+                REPHRASE_LEVEL_OPTIONS.polish.prompt;
+            const stylePrompt = REPHRASE_STYLE_OPTIONS[settings.rephraseStyle]?.prompt ||
+                REPHRASE_STYLE_OPTIONS.preserve.prompt;
+            const customInstruction = settings.customInstructions
+                ? ` התחשב גם בהנחיות האישיות האלה: ${settings.customInstructions}.`
+                : '';
+
+            return `ערוך אך ורק את הטיוטה המצורפת. ${levelPrompt}. ${stylePrompt}. ` +
+                'אל תוסיף עובדות, הבטחות, שמות או פרטים שאינם מופיעים בטיוטה או בהקשר. ' +
+                'אל תשנה את משמעות הדברים ואל תענה מחדש להודעה במקום לערוך את הטיוטה.' +
+                customInstruction;
         }
 
         const stylePrompt = STYLE_OPTIONS[settings.style]?.prompt || STYLE_OPTIONS.direct.prompt;
@@ -689,14 +755,24 @@
             return null;
         }
 
+        const draftSection = mode === 'rephrase'
+            ? `
+הטיוטה שכתב המשתמש ושאותה יש לערוך:
+<draft>
+${context.draftText}
+</draft>
+`
+            : '';
+
         const systemPrompt = `
-אתה מנסח תגובה עבור הודעת Google Chat.
+אתה מנסח תגובה עבור הודעה ב-Gmail או ב-Google Chat.
 ${buildIdentityInstruction(settings)}
 
 הטקסט הגולמי מחלון הצ'אט:
 ${context.history}
 
 שם איש הקשר כפי שזוהה בממשק: ${context.contactName}.
+${draftSection}
 
 הוראות לתגובה:
 ${buildReplyInstruction(settings, mode)}
@@ -735,8 +811,30 @@ ${buildReplyInstruction(settings, mode)}
         inputDiv.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    function insertTextToInput(chatElement, text) {
-        const inputDiv = chatElement.querySelector(CONFIG.selectors.chatInput);
+    function getInputElement(chatElement, inputOverride = null) {
+        return inputOverride || chatElement.querySelector(CONFIG.selectors.chatInput);
+    }
+
+    function getProtectedComposeNode(inputDiv) {
+        return inputDiv.querySelector(
+            '.gmail_signature, [data-smartmail="gmail_signature"], .gmail_quote'
+        );
+    }
+
+    function getDraftText(inputDiv) {
+        if (!inputDiv) return '';
+
+        const protectedNode = getProtectedComposeNode(inputDiv);
+        if (!protectedNode) return (inputDiv.innerText || inputDiv.textContent || '').trim();
+
+        const range = document.createRange();
+        range.setStart(inputDiv, 0);
+        range.setEndBefore(protectedNode);
+        return range.toString().trim();
+    }
+
+    function insertTextToInput(chatElement, text, inputOverride = null) {
+        const inputDiv = getInputElement(chatElement, inputOverride);
         if (!inputDiv) return false;
 
         inputDiv.focus();
@@ -746,19 +844,28 @@ ${buildReplyInstruction(settings, mode)}
         return true;
     }
 
-    function replaceTextInInput(chatElement, text) {
-        const inputDiv = chatElement.querySelector(CONFIG.selectors.chatInput);
+    function replaceTextInInput(chatElement, text, inputOverride = null) {
+        const inputDiv = getInputElement(chatElement, inputOverride);
         if (!inputDiv) return false;
 
         inputDiv.focus();
         const range = document.createRange();
-        range.selectNodeContents(inputDiv);
+        const protectedNode = getProtectedComposeNode(inputDiv);
+        range.setStart(inputDiv, 0);
+        if (protectedNode) {
+            range.setEndBefore(protectedNode);
+        } else {
+            range.selectNodeContents(inputDiv);
+        }
         const selection = window.getSelection();
         selection.removeAllRanges();
         selection.addRange(range);
 
         const inserted = document.execCommand('insertText', false, text);
-        if (!inserted) inputDiv.textContent = text;
+        if (!inserted) {
+            range.deleteContents();
+            range.insertNode(document.createTextNode(text));
+        }
         dispatchInputEvents(inputDiv);
         return true;
     }
@@ -778,6 +885,7 @@ ${buildReplyInstruction(settings, mode)}
             'color:#202124',
             'cursor:pointer',
             'font:600 12px/1 Arial,sans-serif',
+            'flex:0 0 auto',
             'pointer-events:auto'
         ].join(';');
         return button;
@@ -817,16 +925,27 @@ ${buildReplyInstruction(settings, mode)}
             'position:relative',
             'z-index:99999',
             'pointer-events:auto',
-            'flex-wrap:wrap'
+            'max-width:100%',
+            'overflow-x:auto',
+            'scrollbar-width:none',
+            'flex-wrap:nowrap'
         ].join(';');
 
         const textBtn = createChatButton('✨ מלל', 'יצירת תשובת טקסט');
         const emojiBtn = createChatButton('✨ אימוג׳י', 'יצירת תשובת אימוג׳י');
         const rewriteBtn = createChatButton('↻ מחדש', 'יצירת ניסוח אחר');
+        const rephraseBtn = createChatButton('✎ ניסוח', 'שיפור ניסוח הטיוטה הקיימת');
         const settingsBtn = createChatButton('⚙ הגדרות', 'פתיחת הגדרות תגובות AI');
 
         const handleAiAction = async (mode, button) => {
             if (button.disabled) return;
+
+            const draftText = mode === 'rephrase' ? getDraftText(inputElement) : '';
+            if (mode === 'rephrase' && !draftText) {
+                alert('יש לכתוב טיוטה בשדה ההודעה לפני שלוחצים על ניסוח.');
+                inputElement.focus();
+                return;
+            }
 
             const originalText = button.textContent;
             button.disabled = true;
@@ -834,13 +953,14 @@ ${buildReplyInstruction(settings, mode)}
 
             try {
                 const context = getChatContext(chatElement);
+                context.draftText = draftText;
                 const response = await generateAiResponse(context, mode);
 
                 if (response) {
-                    if (mode === 'rewrite') {
-                        replaceTextInInput(chatElement, response);
+                    if (mode === 'rewrite' || mode === 'rephrase') {
+                        replaceTextInInput(chatElement, response, inputElement);
                     } else {
-                        insertTextToInput(chatElement, response);
+                        insertTextToInput(chatElement, response, inputElement);
                     }
                 }
             } finally {
@@ -852,9 +972,10 @@ ${buildReplyInstruction(settings, mode)}
         bindChatButton(textBtn, () => handleAiAction('text', textBtn));
         bindChatButton(emojiBtn, () => handleAiAction('emoji', emojiBtn));
         bindChatButton(rewriteBtn, () => handleAiAction('rewrite', rewriteBtn));
+        bindChatButton(rephraseBtn, () => handleAiAction('rephrase', rephraseBtn));
         bindChatButton(settingsBtn, openSettingsModal);
 
-        btnGroup.append(textBtn, emojiBtn, rewriteBtn, settingsBtn);
+        btnGroup.append(textBtn, emojiBtn, rewriteBtn, rephraseBtn, settingsBtn);
         insertionParent.insertBefore(btnGroup, inputContainer);
     }
 
