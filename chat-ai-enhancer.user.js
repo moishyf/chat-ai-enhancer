@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         Google Chat AI Replier (Gemini) - Pro
-// @namespace    http://tampermonkey.net/
-// @version      2.2
+// @namespace    Frozi
+// @version      2.2.1
+// @updateURL    https://raw.githubusercontent.com/moishyf/chat-ai-enhancer/main/chat-ai-enhancer.user.js
+// @downloadURL  https://raw.githubusercontent.com/moishyf/chat-ai-enhancer/main/chat-ai-enhancer.user.js
 // @description  AI replies for Google Chat with a complete settings panel
 // @match        https://mail.google.com/*
 // @match        https://chat.google.com/*
