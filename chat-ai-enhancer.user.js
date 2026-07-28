@@ -1,278 +1,222 @@
-// ==UserScript==
-// @name         Unified Chat AI Enhancer (גרסה 3.4.4)
-// @namespace    Frozi
-// @version      3.4.4
-// @description  תגובות AI טבעיות בג׳ימייל/גוגל-צ׳אט – טריגרים (-/--/---) + בדיקת מפתח אוטומטית
-// @match        https://mail.google.com/*
-// @match        https://chat.google.com/*
-// @run-at       document-end
-// @grant        GM_xmlhttpRequest
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        GM_registerMenuCommand
-// @grant        GM_addStyle
-// @connect      generativelanguage.googleapis.com
-// ==/UserScript==
+# Google Chat AI Replier – תגובות חכמות ל־Google Chat
 
-(() => {
-  'use strict';
+סקריפט Tampermonkey שמוסיף ל־Google Chat ולצ'אט המובנה בתוך Gmail אפשרות ליצור תשובות אוטומטיות באמצעות Gemini AI.
 
-  const MODEL = 'gemini-1.5-flash';
-  let MY_NAME = 'אני';
-  let OTHER_NAME = '';
-  let lastContextPrompt = '';
-  let activeBox = null;
-  let waitingForReply = null;
+הסקריפט מוסיף כפתורי פעולה ישירות ליד שורת ההקלדה, כולל יצירת תשובת טקסט, תשובת אימוג'י, ניסוח מחדש ופתיחת מסך הגדרות.
 
-  // --- ניהול מפתח API ---
-  const getKey = () => GM_getValue('gemini_api_key', '');
-  
-  const setKey = () => {
-    const cur = getKey();
-    // הצגת הודעה מעט ברורה יותר
-    const input = prompt(
-      'Unified Chat AI:\n\nהזן את מפתח ה-API שלך מ-Google Gemini:\n(אם תשאיר ריק - המפתח יימחק)', 
-      cur
-    );
-    if (input === null) return; // המשתמש לחץ ביטול
-    GM_setValue('gemini_api_key', input.trim());
-    
-    if (input.trim()) {
-        alert('✅ מפתח נשמר בהצלחה! עכשיו אפשר להשתמש בטריגרים.');
-    } else {
-        alert('🔓 המפתח נמחק.');
-    }
-  };
+## ✨ תכונות עיקריות
 
-  // רישום הפקודה בתפריט (למקרה שתרצה לשנות בעתיד)
-  GM_registerMenuCommand('🔑 הגדר מפתח API', setKey);
+- יצירת תשובת טקסט חכמה בהתאם להקשר השיחה.
+- יצירת תגובה באמצעות אימוג'י בלבד.
+- יצירת ניסוח חלופי לתגובה שכבר נוצרה.
+- תמיכה ב־Google Chat ובצ'אט המובנה בתוך Gmail.
+- ממשק הגדרות מלא בעברית.
+- בחירת סגנון התגובה:
+  - ישיר וענייני
+  - חברי וחם
+  - מצחיק וקליל
+  - עוקצני
+  - רשמי ומכובד
+  - מקצועי
+  - אמפתי ורגיש
+  - יומיומי וסלנג
+- בחירת אורך התגובה:
+  - קצר מאוד
+  - קצר
+  - בינוני
+  - ארוך ומפורט
+- אפשרות להוסיף הנחיות אישיות קבועות.
+- התאמת ניסוח התשובות לפי שם ומגדר בעל החשבון.
+- אפשרות להגדיר אנשי קשר מסוימים שעבורם תישלח תגובה אוטומטית.
+- שמירת ההגדרות באופן מקומי באמצעות Tampermonkey.
+- תמיכה בממשק עברי ובכתיבה מימין לשמאל.
 
-  // --- תיקון: בדיקה אוטומטית בטעינה ---
-  // אם אין מפתח שמור, נקפיץ את החלונית אוטומטית אחרי שנייה
-  if (!getKey()) {
-      setTimeout(setKey, 1500);
-  }
+## 📋 דרישות
 
-  GM_addStyle(`
-    @keyframes dots {
-      0% { content: '' }
-      33% { content: '.' }
-      66% { content: '..' }
-      100% { content: '...' }
-    }
-    .dotty::after {
-      display: inline-block;
-      white-space: pre;
-      animation: dots 1s steps(3,end) infinite;
-      content: '';
-    }
-  `);
+לפני ההתקנה יש צורך ב־:
 
-  const triggerInputEvent = (element) => {
-    element.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-  };
+1. דפדפן התומך בתוסף Tampermonkey.
+2. התקנת Tampermonkey.
+3. מפתח API פעיל של Google Gemini.
+4. חשבון Google עם גישה ל־Google Chat או Gmail.
 
-  const $all = sel => Array.from(document.querySelectorAll(sel));
-  const getAllMessages = () => $all('.Zc1Emd').filter(el => el.innerText.trim());
-  
-  const senderOf = el =>
-    (el?.closest('[data-sender-name]')?.getAttribute('data-sender-name')) || '';
-  
-  const getLastSenderName = () => {
-    const msgs = getAllMessages();
-    const last = msgs.at(-1);
-    return last ? senderOf(last) : '';
-  };
+## 🚀 התקנה
 
-  const getLastMessagesText = n =>
-    getAllMessages()
-      .slice(-n)
-      .map(el => `${senderOf(el)}: ${el.innerText.trim()}`)
-      .join('\n');
+### אפשרות ראשונה – התקנה ישירה מ־GitHub
 
-  const getLastMessageOnly = () =>
-    getAllMessages().at(-1)?.innerText.trim() || '';
+1. התקינו את התוסף [Tampermonkey](https://www.tampermonkey.net/).
+2. פתחו את קובץ הסקריפט ב־GitHub.
+3. לחצו על הכפתור **Raw**.
+4. Tampermonkey אמור לזהות את הסקריפט ולפתוח מסך התקנה.
+5. לחצו על **Install**.
 
-  const detectNames = activeBox => {
-    if (!activeBox?.isContentEditable) return;
-    const msgs = getAllMessages();
-    const idx = msgs.findIndex(el => el.contains(activeBox)); 
-    if (idx > 0) {
-      const meCandidate = senderOf(msgs[idx - 1]);
-      if (meCandidate) MY_NAME = meCandidate;
-    }
-    const lastSender = getLastSenderName();
-    if (lastSender && lastSender !== MY_NAME) OTHER_NAME = lastSender;
-  };
+### אפשרות שנייה – התקנה ידנית
 
-  const RESPONSES = [
-    'סבבה', 'ברור', 'מגניב', 'וואלה', 'חח', 'קטלני', 'יאללה',
-    'מעולה', 'נשמע טוב', '👍', '👌', '🤙', '🔥', '🚀', '✅', '😉'
-  ];
+1. פתחו את לוח הבקרה של Tampermonkey.
+2. לחצו על יצירת סקריפט חדש.
+3. מחקו את התוכן הקיים.
+4. העתיקו את כל תוכן קובץ הסקריפט מהמאגר.
+5. הדביקו אותו בעורך.
+6. שמרו באמצעות `Ctrl + S`.
+7. רעננו את Gmail או את Google Chat.
 
-  const askGemini = promptText =>
-    new Promise(resolve => {
-      const key = getKey();
-      if (!key) {
-          setKey(); // אם מנסים להשתמש ואין מפתח - נקפיץ שוב את החלון
-          return resolve('🛑 חסר מפתח API - הזן אותו בחלון שנפתח');
-      }
-      GM_xmlhttpRequest({
-        method: 'POST',
-        url: `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`,
-        headers: { 'Content-Type': 'application/json' },
-        data: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: promptText }] }]
-        }),
-        onload: r => {
-          try {
-            const j = JSON.parse(r.responseText);
-            resolve(
-              j.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '❌ שגיאה בתשובה'
-            );
-          } catch (e) {
-            console.error(e);
-            resolve('❌ (parse error)');
-          }
-        },
-        onerror: () => resolve('❌ (net error)')
-      });
-    });
+## 🔑 יצירת מפתח Gemini API
 
-  const showLoader = (box, txt, desc) => {
-    box.textContent = '';
-    const w = document.createElement('span');
-    w.style.color = '#888';
-    w.textContent = desc;
-    const d = document.createElement('span');
-    d.classList.add('dotty');
-    w.appendChild(d);
-    box.appendChild(w);
-  };
+הסקריפט משתמש ב־Gemini API לצורך יצירת התגובות.
 
-  window.addEventListener('focusin', ev => {
-    const box = ev.target;
-    if (!box.isContentEditable || box.dataset.hooked) return;
-    
-    box.dataset.hooked = '1';
-    activeBox = box;
-    detectNames(box);
+1. היכנסו ל־[Google AI Studio](https://aistudio.google.com/app/apikey).
+2. התחברו לחשבון Google.
+3. צרו מפתח API חדש.
+4. העתיקו את המפתח.
+5. פתחו את Gmail או את Google Chat.
+6. לחצו על הכפתור **⚙ הגדרות** שמופיע ליד שורת ההקלדה.
+7. הדביקו את המפתח בשדה **מפתח Gemini API**.
+8. הזינו שם ובחרו מגדר.
+9. לחצו על **שמירה**.
 
-    box.addEventListener('keydown', async e => {
-        if (e.key !== 'Enter') return;
-        const txt = box.innerText.trim(); 
+> אין לפרסם את מפתח ה־API ב־GitHub, בצילום מסך או בכל מקום ציבורי.
 
-        if (['-', '--', '---'].includes(txt)) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-          waitingForReply = txt;
+## 🛠️ שימוש
 
-          let loaderText = '🎲';
-          if (txt === '-') loaderText = '🎨 אימוג׳ים מותאמים';
-          if (txt === '--') loaderText = '💭 מגיב בהקשר';
-          showLoader(box, txt, loaderText);
+לאחר ההתקנה ורענון העמוד, יופיעו ליד שורת ההקלדה הכפתורים הבאים:
 
-          let reply = '';
-          try {
-            if (txt === '-') {
-              const last = getLastMessageOnly();
-              const prompt = `אתה כותב *רק* 1-3 אימוג׳ים שמתאימים לתוכן הבא שנכתב ע"י "${OTHER_NAME}":
-"${last}"
-ללא מילים כלל – אימוג׳ים בלבד!`;
-              lastContextPrompt = prompt;
-              reply = await askGemini(prompt);
-            } else if (txt === '--') {
-              const context = getLastMessagesText(6);
-              const last = getLastMessageOnly();
-              if (/איך קוראים|מה השם שלי/iu.test(last)) {
-                reply = OTHER_NAME || 'לא בטוח';
-              } else {
-                const prompt = `להלן 6 ההודעות האחרונות בצ'אט. אתה הוא "${MY_NAME}".
-${OTHER_NAME ? `לחבר שלך קוראים "${OTHER_NAME}".` : ''}
+| כפתור | פעולה |
+|---|---|
+| `✨ מלל` | יוצר תשובת טקסט בהתאם להקשר השיחה |
+| `✨ אימוג׳י` | יוצר תגובה המורכבת מאימוג'י בלבד |
+| `↻ מחדש` | יוצר ניסוח חדש ושונה ומחליף את הטקסט הקיים |
+| `⚙ הגדרות` | פותח את מסך ההגדרות |
 
-על סמך ההודעה *האחרונה בלבד* כתוב תשובה קצרה, טבעית, יומיומית (עד 15 מילים). אם צריך אפשר להתחשב בקונטקסט הקודם.
-הודעות:
-${context}
------
-תגובה שלך בלבד:`;
-                lastContextPrompt = prompt;
-                reply = await askGemini(prompt);
-              }
-            } else {
-              reply = RESPONSES[Math.floor(Math.random() * RESPONSES.length)];
-            }
-          } catch (err) {
-            console.error(err);
-            reply = '🛑 שגיאה';
-          }
+התגובה שנוצרת מוכנסת לשורת ההקלדה, כך שאפשר לבדוק ולערוך אותה לפני השליחה.
 
-          box.textContent = reply + '\n← Enter לשליחה';
-          box.style.color = 'green';
-          
-          const range = document.createRange();
-          range.selectNodeContents(box);
-          range.collapse(false);
-          const sel = window.getSelection();
-          sel.removeAllRanges();
-          sel.addRange(range);
-          
-          return;
-        }
+## ⚙️ הגדרות
 
-        if (waitingForReply && box.innerText.includes('← Enter לשליחה')) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
+במסך ההגדרות ניתן להגדיר:
 
-          const cleanText = box.innerText.replace(/\n?← Enter לשליחה/g, '').trim();
-          box.textContent = cleanText;
-          box.style.color = '';
-          waitingForReply = null;
+- מפתח Gemini API.
+- שם בעל החשבון.
+- מגדר בעל החשבון לצורך התאמת הניסוח.
+- סגנון התגובה.
+- אורך התגובה.
+- הנחיות אישיות נוספות.
+- רשימת אנשי קשר לתגובה אוטומטית.
 
-          triggerInputEvent(box); 
+כדי להגדיר כמה אנשי קשר לתגובה אוטומטית, יש להפריד ביניהם באמצעות פסיקים:
 
-          setTimeout(() => {
-              box.dispatchEvent(new KeyboardEvent('keydown', {
-                key: 'Enter',
-                code: 'Enter',
-                keyCode: 13,
-                which: 13,
-                bubbles: true,
-                cancelable: true,
-                composed: true
-              }));
-          }, 10);
-        }
-      }, true);
-  });
+```text
+יעל, ארי, נתנאל
+```
 
-  document.addEventListener('keydown', async e => {
-    if (
-      e.key === 'Tab' &&
-      waitingForReply &&
-      lastContextPrompt &&
-      activeBox?.isContentEditable
-    ) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      showLoader(activeBox, '', '🔄 תגובה חדשה...');
-      try {
-        const newReply = await askGemini(lastContextPrompt);
-        activeBox.textContent = newReply + '\n← Enter לשליחה';
-        activeBox.style.color = 'green';
-        
-        const range = document.createRange();
-        range.selectNodeContents(activeBox);
-        range.collapse(false);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-        
-      } catch (err) {
-        console.error(err);
-        activeBox.textContent = '🛑 שגיאה';
-      }
-    }
-  });
+שמות אנשי הקשר צריכים להתאים ככל האפשר לשמות שמופיעים בכותרת חלון הצ'אט.
 
-  console.log('✅ Unified AI Enhancer 3.4.4 נטען');
-})();
+## ⚠️ תגובות אוטומטיות
+
+הסקריפט כולל אפשרות לשלוח תגובה אוטומטית לאנשי קשר שהוגדרו מראש.
+
+מומלץ להשתמש באפשרות זו בזהירות:
+
+- לבדוק תחילה שהשם מזוהה נכון.
+- להפעיל אותה רק עבור שיחות מתאימות.
+- לזכור שהתגובה נוצרת ונשלחת ללא אישור ידני.
+- לא להשתמש בה בשיחות רגישות או חשובות ללא בדיקה מוקדמת.
+
+## 🔒 פרטיות ואבטחה
+
+- ההגדרות נשמרות מקומית באמצעות Tampermonkey.
+- תוכן השיחה הרלוונטי נשלח ל־Gemini API לצורך יצירת התגובה.
+- מפתח ה־API נשמר באחסון המקומי של Tampermonkey.
+- אין לכלול בקוד עצמו מפתח API אישי.
+- מומלץ לעיין במדיניות הפרטיות ובתנאי השימוש של Google לפני השימוש.
+
+## 🌐 אתרים נתמכים
+
+הסקריפט פועל בכתובות:
+
+```text
+https://mail.google.com/*
+https://chat.google.com/*
+```
+
+## 🧠 מודל AI
+
+הגרסה הנוכחית מוגדרת להשתמש במודל:
+
+```text
+gemini-3.1-flash-lite
+```
+
+ניתן לשנות את שם המודל בקוד באזור ההגדרות:
+
+```javascript
+const CONFIG = {
+    geminiModel: 'gemini-3.1-flash-lite'
+};
+```
+
+שינוי המודל דורש מודל זמין ותואם ב־Gemini API.
+
+## 🐛 פתרון תקלות
+
+### הכפתורים אינם מופיעים
+
+- ודאו שהסקריפט מופעל ב־Tampermonkey.
+- רעננו את Gmail או את Google Chat.
+- נסו לסגור ולפתוח מחדש את חלון הצ'אט.
+- בדקו שהכתובת מתחילה ב־`mail.google.com` או ב־`chat.google.com`.
+
+### מתקבלת הודעה שלא הוגדר מפתח API
+
+פתחו את **⚙ הגדרות**, הזינו מפתח Gemini API ולחצו על שמירה.
+
+### מתקבלת שגיאת API
+
+- בדקו שהמפתח תקין.
+- ודאו שה־API זמין בחשבון שלכם.
+- בדקו שלא חרגתם ממגבלת השימוש.
+- ודאו שהמודל המוגדר בקוד זמין עבור המפתח שלכם.
+
+### התגובה לא נכנסת לשורת ההקלדה
+
+הממשק של Gmail ו־Google Chat עשוי להשתנות מעת לעת. במקרה כזה ייתכן שיהיה צורך לעדכן את הסלקטורים בקוד.
+
+### תגובה אוטומטית אינה נשלחת
+
+- ודאו שהשם מופיע ברשימת אנשי הקשר בהגדרות.
+- הפרידו בין שמות באמצעות פסיקים.
+- ודאו שהשם תואם לשם המוצג בכותרת השיחה.
+- בדקו שהוגדרו מפתח API, שם ומגדר.
+
+## 📌 הערות
+
+- זהו סקריפט קהילתי ואינו מוצר רשמי של Google.
+- הסקריפט אינו קשור ל־Google, ל־Gemini או ל־Tampermonkey.
+- שינויים בממשק Google Chat או Gmail עלולים להשפיע על פעולת הסקריפט.
+- מומלץ לבדוק את התגובה שנוצרה לפני שליחתה.
+
+## 🤝 תרומה לפרויקט
+
+מצאתם תקלה או שיש לכם רעיון לשיפור?
+
+אפשר לפתוח:
+
+- Issue עם תיאור מפורט של הבעיה.
+- Pull Request עם תיקון או שיפור.
+- הצעה לפיצ'ר חדש.
+
+בעת דיווח על תקלה, מומלץ לצרף:
+
+- תיאור מדויק של התקלה.
+- באיזה אתר היא מתרחשת: Gmail או Google Chat.
+- דפדפן וגרסה.
+- צילום מסך, ללא מידע אישי או מפתח API.
+- הודעות שגיאה מה־Console, אם קיימות.
+
+## 📄 רישיון
+
+לא הוגדר עדיין רישיון מפורש לפרויקט.
+
+עד להוספת קובץ `LICENSE`, כל הזכויות בקוד שמורות לבעל המאגר ואין להעתיק, להפיץ או לשנות את הקוד ללא רשות.
+
+---
+
+נבנה כדי להפוך את התגובה ב־Google Chat למהירה, טבעית ונוחה יותר.
