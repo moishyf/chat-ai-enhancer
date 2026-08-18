@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Google Chat AI Replier (Gemini) - Pro
 // @namespace    Frozi
-// @version      2.4.0
-// @description  Context-aware AI replies for Google Chat with native icon controls
+// @version      2.4.1
+// @description  Context-aware AI replies for Google Chat with responsive native icon controls
 // @updateURL    https://raw.githubusercontent.com/moishyf/chat-ai-enhancer/main/chat-ai-enhancer.user.js
 // @downloadURL  https://raw.githubusercontent.com/moishyf/chat-ai-enhancer/main/chat-ai-enhancer.user.js
 // @match        https://mail.google.com/*
@@ -31,7 +31,7 @@
         autoReplyCooldownMs: 15000,
         maxContextMessages: 30,
         maxContextChars: 6000,
-        expandedToolbarMinWidth: 680
+        expandedToolbarMinWidth: 720
     };
 
     const CHAT_ACTIONS = [
@@ -39,6 +39,7 @@
         { id: 'emoji', label: 'יצירת תשובת אימוג׳י', icon: 'emoji' },
         { id: 'rewrite', label: 'יצירת ניסוח אחר', icon: 'refresh' },
         { id: 'rephrase', label: 'שיפור ניסוח הטיוטה הקיימת', icon: 'edit' },
+        { id: 'proofread', label: 'הגהה בלבד — תיקון כתיב ופיסוק', icon: 'proofread' },
         { id: 'settings', label: 'פתיחת הגדרות תגובות AI', icon: 'settings' }
     ];
 
@@ -58,6 +59,10 @@
         edit: [
             'M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3Z',
             'm14 8 3 3'
+        ],
+        proofread: [
+            'M4 5h8M4 10h6M4 15h5',
+            'm13 12-4.5 4.5-2-2'
         ],
         settings: [
             'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z',
@@ -148,9 +153,11 @@
     const lastHandledAutoMessage = new WeakMap();
     const buttonGroupsByInput = new WeakMap();
     const toolbarResizeObservers = new WeakMap();
+    const actionPopoversByGroup = new WeakMap();
     let scanScheduled = false;
     let openActionPopoverGroup = null;
     let actionDismissBound = false;
+    let actionPopoverSequence = 0;
 
     function migrateStyle(value) {
         if (STYLE_OPTIONS[value]) return value;
@@ -856,6 +863,14 @@
             return 'השב רק באמצעות אימוג׳י אחד או כמה אימוג׳ים שמתאימים לשיחה. אל תוסיף מילים.';
         }
 
+        if (mode === 'proofread') {
+            return 'ערוך אך ורק את הטיוטה המצורפת. תקן רק שגיאות כתיב והקלדה, רווחים ופיסוק. ' +
+                'שמור על כל המילים, סדר המילים, הטון, הסגנון, המשמעות ומעברי השורה כפי שהם, ' +
+                'למעט השינוי המזערי הדרוש לתיקון טעות ברורה. אל תנסח מחדש, אל תחליף מילים ' +
+                'במילים נרדפות, אל תוסיף ואל תמחק מידע ואל תשנה את היקף התוכן. ' +
+                'החזר את הטיוטה המתוקנת בלבד.';
+        }
+
         if (mode === 'rephrase') {
             const levelPrompt = REPHRASE_LEVEL_OPTIONS[settings.rephraseLevel]?.prompt ||
                 REPHRASE_LEVEL_OPTIONS.polish.prompt;
@@ -1189,18 +1204,20 @@ ${buildReplyInstruction(settings, mode)}
                 display: inline-grid !important;
             }
             .ai-action-popover {
-                position: absolute;
-                inset-inline-end: 0;
-                bottom: calc(100% + 8px);
-                z-index: 2147483645;
-                display: flex;
+                position: fixed;
+                inset: auto;
+                z-index: 2147483647;
+                display: grid;
+                grid-template-columns: repeat(3, 36px);
                 gap: 2px;
                 padding: 6px;
+                max-width: calc(100vw - 16px);
                 border: 1px solid #dadce0;
                 border-radius: 18px;
                 background: var(--gm3-sys-color-surface-container, #fff);
                 box-shadow: 0 4px 12px rgba(60, 64, 67, .28);
                 direction: rtl;
+                pointer-events: auto;
             }
             .ai-action-popover[hidden] {
                 display: none !important;
@@ -1303,24 +1320,58 @@ ${buildReplyInstruction(settings, mode)}
     }
 
     function closeActionPopover(group) {
-        const popover = group.querySelector('.ai-action-popover');
+        const popover = actionPopoversByGroup.get(group);
         const overflowButton = group.querySelector('.ai-overflow-button');
         if (popover) popover.hidden = true;
         if (overflowButton) overflowButton.setAttribute('aria-expanded', 'false');
         if (openActionPopoverGroup === group) openActionPopoverGroup = null;
     }
 
+    function positionActionPopover(group) {
+        const popover = actionPopoversByGroup.get(group);
+        const overflowButton = group.querySelector('.ai-overflow-button');
+        if (!popover || popover.hidden || !overflowButton?.isConnected) return;
+
+        const anchorRect = overflowButton.getBoundingClientRect();
+        const popoverRect = popover.getBoundingClientRect();
+        const visualViewport = window.visualViewport;
+        const viewportLeft = visualViewport?.offsetLeft || 0;
+        const viewportTop = visualViewport?.offsetTop || 0;
+        const viewportWidth = visualViewport?.width || window.innerWidth;
+        const viewportHeight = visualViewport?.height || window.innerHeight;
+        const margin = 8;
+        const gap = 8;
+
+        const minLeft = viewportLeft + margin;
+        const maxLeft = Math.max(minLeft, viewportLeft + viewportWidth - popoverRect.width - margin);
+        const preferredLeft = anchorRect.right - popoverRect.width;
+        const left = Math.min(Math.max(preferredLeft, minLeft), maxLeft);
+
+        const minTop = viewportTop + margin;
+        const maxTop = Math.max(minTop, viewportTop + viewportHeight - popoverRect.height - margin);
+        const above = anchorRect.top - popoverRect.height - gap;
+        const preferredTop = above >= minTop ? above : anchorRect.bottom + gap;
+        const top = Math.min(Math.max(preferredTop, minTop), maxTop);
+
+        popover.style.left = `${Math.round(left)}px`;
+        popover.style.top = `${Math.round(top)}px`;
+    }
+
     function ensureActionDismissHandler() {
         if (actionDismissBound) return;
         actionDismissBound = true;
         document.addEventListener('pointerdown', (event) => {
-            if (
-                openActionPopoverGroup &&
-                !openActionPopoverGroup.contains(event.target)
-            ) {
-                closeActionPopover(openActionPopoverGroup);
-            }
+            if (!openActionPopoverGroup) return;
+            const popover = actionPopoversByGroup.get(openActionPopoverGroup);
+            if (openActionPopoverGroup.contains(event.target) || popover?.contains(event.target)) return;
+            closeActionPopover(openActionPopoverGroup);
         }, true);
+
+        const repositionOpenPopover = () => {
+            if (openActionPopoverGroup) positionActionPopover(openActionPopoverGroup);
+        };
+        window.addEventListener('resize', repositionOpenPopover, { passive: true });
+        document.addEventListener('scroll', repositionOpenPopover, { capture: true, passive: true });
     }
 
     function configureToolbarResponsiveness(group, inputElement) {
@@ -1343,7 +1394,12 @@ ${buildReplyInstruction(settings, mode)}
     }
 
     function setActionLoading(group, actionId, isLoading) {
-        group.querySelectorAll(`[data-ai-action="${actionId}"]`).forEach((button) => {
+        const popover = actionPopoversByGroup.get(group);
+        const buttons = [
+            ...group.querySelectorAll(`[data-ai-action="${actionId}"]`),
+            ...(popover?.querySelectorAll(`[data-ai-action="${actionId}"]`) || [])
+        ];
+        buttons.forEach((button) => {
             button.disabled = isLoading;
             if (isLoading) {
                 button.setAttribute('aria-busy', 'true');
@@ -1369,6 +1425,11 @@ ${buildReplyInstruction(settings, mode)}
             configureToolbarResponsiveness(existingGroup, inputElement);
             return;
         }
+        if (existingGroup) {
+            closeActionPopover(existingGroup);
+            actionPopoversByGroup.get(existingGroup)?.remove();
+            toolbarResizeObservers.get(existingGroup)?.disconnect?.();
+        }
 
         const btnGroup = document.createElement('div');
         btnGroup.className = 'ai-reply-btn-group';
@@ -1380,16 +1441,18 @@ ${buildReplyInstruction(settings, mode)}
         actionPopover.className = 'ai-action-popover';
         actionPopover.setAttribute('role', 'toolbar');
         actionPopover.setAttribute('aria-label', 'פעולות AI נוספות');
+        actionPopover.id = `ai-action-popover-${++actionPopoverSequence}`;
         actionPopover.hidden = true;
+        actionPopoversByGroup.set(btnGroup, actionPopover);
 
         const handleAiAction = async (mode) => {
             if (btnGroup.querySelector(`[data-ai-action="${mode}"][aria-busy="true"]`)) return;
 
-            const draftText = mode === 'rewrite' || mode === 'rephrase'
+            const draftText = ['rewrite', 'rephrase', 'proofread'].includes(mode)
                 ? getDraftText(inputElement)
                 : '';
-            if (mode === 'rephrase' && !draftText) {
-                alert('יש לכתוב טיוטה בשדה ההודעה לפני שלוחצים על ניסוח.');
+            if (['rephrase', 'proofread'].includes(mode) && !draftText) {
+                alert('יש לכתוב טיוטה בשדה ההודעה לפני שלוחצים על עריכת הטקסט.');
                 inputElement.focus();
                 return;
             }
@@ -1403,7 +1466,7 @@ ${buildReplyInstruction(settings, mode)}
                 const response = await generateAiResponse(context, mode);
 
                 if (response) {
-                    if (mode === 'rewrite' || mode === 'rephrase') {
+                    if (['rewrite', 'rephrase', 'proofread'].includes(mode)) {
                         replaceTextInInput(chatElement, response, inputElement);
                     } else {
                         insertTextToInput(chatElement, response, inputElement);
@@ -1434,6 +1497,7 @@ ${buildReplyInstruction(settings, mode)}
         const overflowButton = createChatButton(overflowAction, 'ai-overflow-button');
         overflowButton.setAttribute('aria-haspopup', 'true');
         overflowButton.setAttribute('aria-expanded', 'false');
+        overflowButton.setAttribute('aria-controls', actionPopover.id);
         bindChatButton(overflowButton, () => {
             const willOpen = actionPopover.hidden;
             if (willOpen && openActionPopoverGroup && openActionPopoverGroup !== btnGroup) {
@@ -1442,17 +1506,30 @@ ${buildReplyInstruction(settings, mode)}
             actionPopover.hidden = !willOpen;
             overflowButton.setAttribute('aria-expanded', String(willOpen));
             openActionPopoverGroup = willOpen ? btnGroup : null;
+            if (willOpen) positionActionPopover(btnGroup);
         });
 
-        btnGroup.append(overflowButton, actionPopover);
+        btnGroup.appendChild(overflowButton);
+        (document.body || document.documentElement).appendChild(actionPopover);
         btnGroup.addEventListener('focusout', (event) => {
-            if (!btnGroup.contains(event.relatedTarget)) closeActionPopover(btnGroup);
+            if (
+                !btnGroup.contains(event.relatedTarget) &&
+                !actionPopover.contains(event.relatedTarget)
+            ) closeActionPopover(btnGroup);
         });
-        btnGroup.addEventListener('keydown', (event) => {
+        actionPopover.addEventListener('focusout', (event) => {
+            if (
+                !btnGroup.contains(event.relatedTarget) &&
+                !actionPopover.contains(event.relatedTarget)
+            ) closeActionPopover(btnGroup);
+        });
+        const handlePopoverEscape = (event) => {
             if (event.key !== 'Escape') return;
             closeActionPopover(btnGroup);
             overflowButton.focus();
-        });
+        };
+        btnGroup.addEventListener('keydown', handlePopoverEscape);
+        actionPopover.addEventListener('keydown', handlePopoverEscape);
         ensureActionDismissHandler();
 
         if (nativeActionHost) {
@@ -1548,6 +1625,7 @@ ${buildReplyInstruction(settings, mode)}
 
     if (globalThis.__CHAT_AI_ENHANCER_TEST_MODE__ === true) {
         globalThis.__CHAT_AI_ENHANCER_TEST_API__ = Object.freeze({
+            buildReplyInstruction,
             extractGoogleChatMessages,
             formatConversationHistory,
             getConversationDirective,
@@ -1566,8 +1644,8 @@ ${buildReplyInstruction(settings, mode)}
             if (!mutation.addedNodes.length) return;
             const addedOnlyByScript = Array.from(mutation.addedNodes).every((node) =>
                 node.nodeType === Node.ELEMENT_NODE &&
-                (node.matches?.('.ai-reply-btn-group, #ai-replier-chat-action-styles') ||
-                    node.closest?.('.ai-reply-btn-group'))
+                (node.matches?.('.ai-reply-btn-group, .ai-action-popover, #ai-replier-chat-action-styles') ||
+                    node.closest?.('.ai-reply-btn-group, .ai-action-popover'))
             );
             if (addedOnlyByScript) return;
 

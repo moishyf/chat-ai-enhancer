@@ -103,6 +103,12 @@ assert.match(selfDirective, /להמשיך באופן טבעי/);
 const otherDirective = api.getConversationDirective({ lastMessageRole: 'other' });
 assert.match(otherDirective, /לנסח עבורה תשובה/);
 
+const proofreadInstruction = api.buildReplyInstruction({}, 'proofread');
+assert.match(proofreadInstruction, /תקן רק שגיאות כתיב והקלדה, רווחים ופיסוק/);
+assert.match(proofreadInstruction, /שמור על כל המילים, סדר המילים, הטון, הסגנון, המשמעות/);
+assert.match(proofreadInstruction, /אל תנסח מחדש/);
+assert.match(proofreadInstruction, /אל תוסיף ואל תמחק מידע/);
+
 assert.equal(api.shouldAutoReplyToLatestMessage({ messages }), false);
 assert.equal(api.shouldAutoReplyToLatestMessage({ messages: messages.slice(0, 1) }), true);
 
@@ -120,9 +126,12 @@ assert.equal(attachmentOnly[0].role, 'self');
 assert.match(attachmentOnly[0].text, /תוכן מצורף/);
 assert.equal(api.shouldAutoReplyToLatestMessage({ messages: attachmentOnly }), false);
 
-assert.match(source, /\/\/ @version\s+2\.4\.0/);
+assert.match(source, /\/\/ @version\s+2\.4\.1/);
 assert.match(source, /createElementNS\(namespace, 'svg'\)/);
 assert.match(source, /data-tooltip/);
+assert.match(source, /\(document\.body \|\| document\.documentElement\)\.appendChild\(actionPopover\)/);
+assert.match(source, /position:\s*fixed;[\s\S]*?\.ai-action-popover\[hidden\]/);
+assert.match(source, /id: 'proofread'/);
 assert.doesNotMatch(source, /createChatButton\(['"](?:✨|↻|✎|⚙)/);
 
 console.log('userscript tests passed');
